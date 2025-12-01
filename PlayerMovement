@@ -1,0 +1,174 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class PlayerMovement : MonoBehaviour
+{
+    [Header("Movement")]
+    public float moveSpeed = 6f;
+
+    [Header("Jump & Gravity")]
+    public float jumpHeight = 2.5f;
+    public float gravity = -20f;
+    public float groundSnapForce = -8f;
+
+    [Header("Slope Handling")]
+    public float slopeCheckDistance = 1.1f;
+    public float tiltSpeed = 10f;
+    public LayerMask groundMask;
+
+    [Header("References")]
+    public Transform cam;
+
+    private CharacterController controller;
+    private Vector3 velocity;
+    private bool isGrounded;
+
+    private Quaternion targetTilt;
+
+
+    public AudioManager audioManager;
+
+    // ★ ADDED — manager reference
+    private Manager mgr;
+
+    void Start()
+    {
+        audioManager = GameObject.FindGameObjectWithTag("Audio").GetComponent<AudioManager>();
+        controller = GetComponent<CharacterController>();
+        if (cam == null)
+            cam = Camera.main.transform;
+
+        // ★ ADDED — get manager instance
+        mgr = Manager.Instance;
+    }
+
+    void Update()
+    {
+        GroundCheck();
+        MovePlayer();
+        HandleGravity();
+        ApplyTilt();
+    }
+
+    // ---------------------------------------------------
+    // GROUND CHECK
+    // ---------------------------------------------------
+    void GroundCheck()
+    {
+        isGrounded = controller.isGrounded;
+
+        if (isGrounded && velocity.y < 0)
+            velocity.y = groundSnapForce;
+    }
+
+    // ---------------------------------------------------
+    // MOVEMENT
+    // ---------------------------------------------------
+    void MovePlayer()
+    {
+        float h = Input.GetAxisRaw("Horizontal");
+        float v = Input.GetAxisRaw("Vertical");
+
+        Vector3 input = new Vector3(h, 0f, v).normalized;
+
+        Vector3 move = Vector3.zero;
+
+        if (input.sqrMagnitude > 0.1f)
+        {
+            float yaw = cam.eulerAngles.y;
+            Vector3 forward = Quaternion.Euler(0, yaw, 0) * new Vector3(input.x, 0f, input.z);
+
+            // ---------------------------------------
+            // ★ APPLY MOVE SPEED BUFF FROM TOMES
+            // ---------------------------------------
+            float finalSpeed = moveSpeed + mgr.moveSpeedBonus;
+            move = forward.normalized * finalSpeed;
+
+            // Apply slope correction
+            if (GetGround(out RaycastHit hit))
+            {
+                move = Vector3.ProjectOnPlane(move, hit.normal);
+                SetTilt(hit.normal, move);
+            }
+        }
+        else
+        {
+            if (GetGround(out RaycastHit hit))
+                SetTilt(hit.normal, transform.forward);
+        }
+
+        controller.Move(move * Time.deltaTime);
+    }
+
+    // ---------------------------------------------------
+    // GRAVITY + JUMP
+    // ---------------------------------------------------
+    void HandleGravity()
+    {
+        if (Input.GetButtonDown("Jump") && isGrounded)
+        {
+            velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
+            audioManager.PlaySFX(audioManager.Jump);
+        }
+
+        velocity.y += gravity * Time.deltaTime;
+        controller.Move(velocity * Time.deltaTime);
+    }
+
+    // ---------------------------------------------------
+    // SLOPE + TILT LOGIC
+    // ---------------------------------------------------
+    bool GetGround(out RaycastHit hit)
+    {
+        Vector3 origin = transform.position + Vector3.up * 0.1f;
+        return Physics.Raycast(origin, Vector3.down, out hit, slopeCheckDistance, groundMask);
+    }
+
+    void SetTilt(Vector3 groundNormal, Vector3 forward)
+    {
+        Vector3 flatForward = Vector3.ProjectOnPlane(forward, groundNormal);
+        targetTilt = Quaternion.LookRotation(flatForward, groundNormal);
+    }
+
+    void ApplyTilt()
+    {
+        if (!isGrounded)
+        {
+            float h = Input.GetAxisRaw("Horizontal");
+            float v = Input.GetAxisRaw("Vertical");
+
+            Vector3 input = new Vector3(h, 0, v);
+
+            if (input.sqrMagnitude > 0.1f)
+            {
+                float yaw = cam.eulerAngles.y;
+                Vector3 airForward = Quaternion.Euler(0, yaw, 0) * input.normalized;
+
+                Quaternion airRot = Quaternion.LookRotation(airForward, Vector3.up);
+
+                transform.rotation = Quaternion.Slerp(
+                    transform.rotation,
+                    airRot,
+                    10f * Time.deltaTime
+                );
+            }
+
+            return;
+        }
+
+        transform.rotation = Quaternion.Slerp(
+            transform.rotation,
+            targetTilt,
+            Time.deltaTime * tiltSpeed
+        );
+    }
+
+    private void OnTriggerEnter(Collider collision)
+    {
+        if (collision.CompareTag("Orb"))
+        {
+            audioManager.PlaySFX(audioManager.Coin);
+        }
+    }
+}
