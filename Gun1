@@ -1,0 +1,18 @@
+using UnityEngine;
+
+public class PurifierBoltfire : WeaponBase
+{
+    public GameObject boltPrefab;
+    public Transform Muzzle;
+    public float boltSpeed = 28f;
+
+    protected override void AutoFire()
+    {
+        if (target == null || boltPrefab == null) return;
+
+        Vector3 origin = Muzzle ? Muzzle.position : transform.position;
+        Vector3 dir = (target.position - origin).normalized;
+
+        SpawnProjectile(boltPrefab, origin, dir, boltSpeed);
+    }
+}
