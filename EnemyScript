@@ -1,0 +1,244 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+[RequireComponent(typeof(CharacterController))]
+public class BadCapsule : MonoBehaviour
+{
+    private Transform player;
+    private CharacterController controller;
+
+    [Header("Movement Settings")]
+    public float moveSpeed = 6f;
+    public float gravity = -20f;
+    public float rotationSpeed = 8f;
+    public float slopeLimit = 80f;
+
+    // TILT RESTORE
+    public float tiltAmount = 15f;
+    public float tiltSpeed = 10f;
+
+    [Header("Health Settings")]
+    public int maxHealth = 3;
+    private int currentHealth;
+    private bool isDead = false;
+
+    private Vector3 velocity;
+    private Vector3 groundNormal = Vector3.up;
+
+    [Header("XP Drop")]
+    public GameObject xpOrbPrefab;
+    public float xpAmount = 25f;
+
+    [Header("Hit Feedback")]
+    public Renderer bodyRenderer;
+    public Color hitColor = Color.red;
+    private Color originalColor;
+
+    [Header("White Flash Mesh (child object)")]
+    public GameObject hitFlash;
+
+    // Knockback + Stun + Burn
+    public float knockbackForce = 8f;
+    public float knockbackDuration = 0.15f;
+    private Vector3 knockbackVelocity;
+    private float knockbackTimer = 0f;
+
+    private bool stunned = false;
+    private float stunTimer = 0f;
+
+    private bool burning = false;
+    private float burnTimer = 0f;
+    private float burnDPS = 0f;
+
+    public AudioManager audioManager;
+
+    void Start()
+    {
+        audioManager = GameObject.FindGameObjectWithTag("Audio").GetComponent<AudioManager>();
+        controller = GetComponent<CharacterController>();
+        controller.slopeLimit = slopeLimit;
+        controller.stepOffset = 0.6f;
+
+        currentHealth = maxHealth;
+
+        player = GameObject.FindGameObjectWithTag("Player")?.transform;
+
+        if (bodyRenderer != null)
+            originalColor = bodyRenderer.material.color;
+
+        if (hitFlash != null)
+            hitFlash.SetActive(false);
+    }
+
+    void Update()
+    {
+        if (isDead) return;
+
+        // -------- STUN --------
+        if (stunned)
+        {
+            stunTimer -= Time.deltaTime;
+            if (stunTimer > 0f) return;
+            stunned = false;
+        }
+
+        // -------- KNOCKBACK --------
+        if (knockbackTimer > 0f)
+        {
+            knockbackTimer -= Time.deltaTime;
+            controller.Move(knockbackVelocity * Time.deltaTime);
+            return;
+        }
+
+        // -------- BURN --------
+        if (burning)
+        {
+            burnTimer -= Time.deltaTime;
+            float tick = burnDPS * Time.deltaTime;
+            if (tick > 0f)
+                TakeDamage(Mathf.Max(1, Mathf.RoundToInt(tick)), transform.position);
+
+            if (burnTimer <= 0f)
+                burning = false;
+        }
+
+        if (player == null)
+        {
+            player = GameObject.FindGameObjectWithTag("Player")?.transform;
+            return;
+        }
+
+        MoveTowardPlayer();
+    }
+
+    void MoveTowardPlayer()
+    {
+        Vector3 toPlayer = player.position - transform.position;
+        Vector3 move = toPlayer.normalized;
+
+        // slope adjust
+        if (Physics.Raycast(transform.position + Vector3.up * 0.5f, Vector3.down, out RaycastHit hit, 2f))
+        {
+            groundNormal = hit.normal;
+            move = Vector3.ProjectOnPlane(move, hit.normal).normalized;
+        }
+        else groundNormal = Vector3.up;
+
+        // rotate toward player
+        if (move.sqrMagnitude > 0.01f)
+        {
+            Vector3 flat = move; flat.y = 0;
+            Quaternion targetRot = Quaternion.LookRotation(flat, Vector3.up);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, Time.deltaTime * rotationSpeed);
+        }
+
+        // ---- RESTORED TILT ----
+        float tilt = Mathf.Clamp(-toPlayer.x * tiltAmount, -tiltAmount, tiltAmount);
+        Quaternion tiltRot = Quaternion.Euler(0, 0, tilt);
+        transform.rotation = Quaternion.Lerp(transform.rotation, tiltRot * transform.rotation, Time.deltaTime * tiltSpeed);
+
+        if (controller.isGrounded && velocity.y < 0)
+            velocity.y = -2f;
+
+        velocity.y += gravity * Time.deltaTime;
+
+        controller.Move((move * moveSpeed + velocity) * Time.deltaTime);
+    }
+
+    // DAMAGE ------------------------------------------------------
+    public void TakeDamage(int dmg, Vector3 hitSource)
+    {
+        if (isDead) return;
+
+        currentHealth -= dmg;
+
+        if (hitFlash != null)
+            StartCoroutine(FlashWhite());
+            audioManager.PlaySFX(audioManager.Hit);
+
+        if (bodyRenderer != null)
+            StartCoroutine(FlashRed());
+            audioManager.PlaySFX(audioManager.explosion);
+
+        // knockback
+        Vector3 dir = (transform.position - hitSource).normalized;
+        dir.y = 0f;
+
+        knockbackVelocity = dir * knockbackForce;
+        knockbackTimer = knockbackDuration;
+
+        if (currentHealth <= 0)
+            Die();
+    }
+
+    public void ApplyKnockback(Vector3 direction, float strength)
+    {
+        Vector3 dir = direction.normalized;
+        dir.y = 0f;
+        knockbackVelocity = dir * strength;
+        knockbackTimer = knockbackDuration;
+    }
+
+    public void ApplyBurn(float dps, float duration)
+    {
+        burning = true;
+        burnDPS = dps;
+        burnTimer = Mathf.Max(burnTimer, duration);
+    }
+
+    public void ApplyStun(float duration)
+    {
+        stunned = true;
+        stunTimer = Mathf.Max(stunTimer, duration);
+    }
+
+    IEnumerator FlashWhite()
+    {
+        if (hitFlash == null) yield break;
+        hitFlash.SetActive(true);
+        yield return new WaitForSeconds(0.07f);
+        hitFlash.SetActive(false);
+    }
+
+    IEnumerator FlashRed()
+    {
+        if (bodyRenderer == null) yield break;
+        bodyRenderer.material.color = hitColor;
+        yield return new WaitForSeconds(0.1f);
+        bodyRenderer.material.color = originalColor;
+    }
+
+    void Die()
+    {
+        if (isDead) return;
+        isDead = true;
+
+        if (xpOrbPrefab != null)
+        {
+            GameObject orb = Instantiate(xpOrbPrefab, transform.position + Vector3.up, Quaternion.identity);
+            Orb o = orb.GetComponent<Orb>();
+            if (o != null)
+                o.xpAmount = xpAmount;
+        }
+
+        EnemyRespawn respawn = FindObjectOfType<EnemyRespawn>();
+        if (respawn != null)
+        {
+            respawn.OnEnemyDied(gameObject);
+            gameObject.SetActive(false);
+        }
+        else Destroy(gameObject, 0.2f);
+    }
+
+    public void ResetState()
+    {
+        isDead = false;
+        currentHealth = maxHealth;
+        velocity = Vector3.zero;
+        knockbackTimer = 0f;
+        stunned = false;
+        burning = false;
+        gameObject.SetActive(true);
+    }
+}
