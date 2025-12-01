@@ -1,0 +1,49 @@
+using UnityEngine;
+
+public class ZapFieldAura : MonoBehaviour
+{
+    [Header("Zap Settings")]
+    public LayerMask enemyMask;           // assign enemy layer(s)
+    public float damagePerSecond = 10f;   // base DPS
+    public float radius = 4f;
+    public float tickInterval = 0.1f;     // smaller = more "spammy"
+
+    private float tickTimer = 0f;
+
+    public AudioManager audioManager;
+
+
+    void Start()
+    {
+        audioManager = GameObject.FindGameObjectWithTag("Audio").GetComponent<AudioManager>();
+    }
+
+    void Update()
+    {
+        tickTimer += Time.deltaTime;
+        if (tickTimer < tickInterval) return;
+        tickTimer = 0f;
+
+        // damage per tick (float)
+        float dmgTick = damagePerSecond * tickInterval * (Manager.Instance != null ? Manager.Instance.damageMultiplier : 1f);
+        int dmgInt = Mathf.Max(1, Mathf.RoundToInt(dmgTick));
+
+        Collider[] hits = Physics.OverlapSphere(transform.position, radius, enemyMask);
+        foreach (var col in hits)
+        {
+            BadCapsule enemy = col.GetComponent<BadCapsule>();
+            if (enemy != null)
+            {
+                // NO knockback — just damage
+                enemy.TakeDamage(dmgInt, transform.position);
+                audioManager.PlaySFX(audioManager.Zap);
+            }
+        }
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, radius);
+    }
+}
