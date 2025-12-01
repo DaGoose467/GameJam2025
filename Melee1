@@ -1,0 +1,72 @@
+using UnityEngine;
+
+public class SawOfCondemnation : WeaponBase
+{
+    [Header("Slash Settings")]
+    public float damage = 45f;
+
+    [Tooltip("Default slash radius.")]
+    public float range = 3f;
+
+    [Tooltip("How much larger the detection bubble is (1 = normal, 2 = double size).")]
+    public float radiusMultiplier = 1.8f;
+
+    [Range(10f, 180f)]
+    public float angle = 120f;
+
+    [Header("VFX")]
+    public GameObject slashPrefab;
+
+    private bool leftToRight = true;
+
+    protected override void AutoFire()
+    {
+        SpawnSlash();
+        SlashDamage();
+        leftToRight = !leftToRight;
+    }
+
+    void SpawnSlash()
+    {
+        if (!slashPrefab) return;
+
+        GameObject vfx = Instantiate(slashPrefab, transform.position, transform.rotation, transform);
+
+        // Play trail reliably
+        SawSlashVFX fx = vfx.GetComponent<SawSlashVFX>();
+        if (fx != null)
+        {
+            fx.Play(leftToRight);
+
+            // Force restart on Trails if needed
+            var trails = vfx.GetComponentsInChildren<TrailRenderer>();
+            foreach (var t in trails)
+            {
+                t.Clear();
+                t.emitting = true;
+            }
+        }
+    }
+
+    void SlashDamage()
+    {
+        float realRange = range * radiusMultiplier; // 👈 Bigger bubble
+
+        Collider[] hits = Physics.OverlapSphere(transform.position, realRange, enemyMask);
+
+        foreach (var col in hits)
+        {
+            Vector3 dir = (col.transform.position - transform.position).normalized;
+
+            // FRONT check only
+            float dot = Vector3.Dot(transform.forward, dir);
+            if (dot < Mathf.Cos(angle * 0.5f * Mathf.Deg2Rad)) continue;
+
+            BadCapsule e = col.GetComponent<BadCapsule>();
+            if (e == null) continue;
+
+            float dmg = damage * (Manager.Instance ? Manager.Instance.damageMultiplier : 1f);
+            e.TakeDamage(Mathf.RoundToInt(dmg), transform.position);
+        }
+    }
+}
