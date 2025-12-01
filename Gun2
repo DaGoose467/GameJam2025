@@ -1,0 +1,22 @@
+using UnityEngine;
+
+public class LanceOfAbsolution : WeaponBase
+{
+    [Header("Sniper Settings")]
+    public GameObject bulletPrefab;
+    public Transform muzzle;
+    public float bulletSpeed = 80f;
+    public int maxPierce = 5;
+
+    protected override void AutoFire()
+    {
+        if (!bulletPrefab || target == null) return;
+
+        Vector3 origin = muzzle ? muzzle.position : transform.position;
+        Vector3 dir = (target.position - origin).normalized;
+
+        GameObject b = Instantiate(bulletPrefab, origin, Quaternion.LookRotation(dir));
+        LanceBullet lb = b.GetComponent<LanceBullet>();
+        lb.Initialize(this, dir, bulletSpeed, maxPierce);
+    }
+}
